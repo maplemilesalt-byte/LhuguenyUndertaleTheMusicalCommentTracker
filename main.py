@@ -34,6 +34,13 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def comments_per_second(comment_count: int, elapsed_seconds: float) -> float:
+    """Return the approximate rate observed between two API polls."""
+    if elapsed_seconds <= 0:
+        return 0.0
+    return comment_count / elapsed_seconds
+
+
 def api_get(api_key: str, page_token: str | None = None) -> dict:
     params = {
         "part": "snippet",
@@ -159,6 +166,7 @@ def main() -> int:
         print(exc, file=sys.stderr)
         return 1
 
+    last_poll = time.monotonic()
     try:
         while True:
             time.sleep(args.interval)
@@ -169,13 +177,24 @@ def main() -> int:
                 continue
 
             now = utc_now()
+            poll_finished = time.monotonic()
+            elapsed = poll_finished - last_poll
+            last_poll = poll_finished
+            rate = comments_per_second(len(fresh), elapsed)
             while recent_times and (now - recent_times[0]).total_seconds() > 60:
                 recent_times.popleft()
 
             if not fresh:
-                print(f"[{now.strftime('%H:%M:%S UTC')}] No new comments in the latest results.")
+                print(
+                    f"[{now.strftime('%H:%M:%S UTC')}] No new comments in the latest results. "
+                    f"Observed rate: {rate:.2f} comments/s over {elapsed:.1f}s."
+                )
                 continue
 
+            print(
+                f"\nActivity rate: {rate:.2f} comments/s "
+                f"({len(fresh)} new comments over {elapsed:.1f}s)"
+            )
             for comment in fresh:
                 comment["observed_at"] = now.isoformat()
                 seen.add(comment["id"])
